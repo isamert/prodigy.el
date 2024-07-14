@@ -1147,17 +1147,37 @@ put in stopped status."
     (-when-let (process (plist-get service :process))
       (when (process-live-p process)
         (prodigy-set-status service 'stopping)
-        (let ((stop-signal (prodigy-service-stop-signal service)))
-          (cond ((eq stop-signal 'int)
-                 (interrupt-process process))
-                ((or force (eq stop-signal 'kill))
-                 (kill-process process))
-                ((eq stop-signal 'quit)
-                 (quit-process process))
-                ((eq stop-signal 'stop)
-                 (stop-process process))
-                (t
-                 (signal-process process (or stop-signal 'int)))))
+        (let ((stop-signal (prodigy-service-stop-signal service))
+              (sudo (plist-get service :sudo)))
+          (if sudo
+              ;; Kill each process (probably just one) started by
+              ;; sudo. `process-id' returns the group id that is
+              ;; created by sudo, not the actual process' id. Sending
+              ;; a signal to this group id *may not* be redirected to
+              ;; the children. So instead, we find the children and
+              ;; send them the signal, using `sudo kill'.
+              (--each (s-lines
+                       (s-trim
+                        (shell-command-to-string
+                         (format "pgrep -P %s" (process-id process)))))
+                (prodigy-start-sudo-process
+                 "*prodigy-sudo-kill*" nil
+                 "kill"
+                 (concat "-" (cond
+                              ((null stop-signal) "INT")
+                              ((symbolp stop-signal) (upcase (symbol-name stop-signal)))
+                              (force "KILL")))
+                 it))
+            (cond ((eq stop-signal 'int)
+                   (interrupt-process process))
+                  ((or force (eq stop-signal 'kill))
+                   (kill-process process))
+                  ((eq stop-signal 'quit)
+                   (quit-process process))
+                  ((eq stop-signal 'stop)
+                   (stop-process process))
+                  (t
+                   (signal-process process (or stop-signal 'int))))))
         (let ((tryout 0))
           (prodigy-every 1
               (lambda (next)
