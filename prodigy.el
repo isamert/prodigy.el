@@ -1147,27 +1147,16 @@ put in stopped status."
     (-when-let (process (plist-get service :process))
       (when (process-live-p process)
         (prodigy-set-status service 'stopping)
-        (let ((stop-signal (prodigy-service-stop-signal service))
-              (sudo (plist-get service :sudo)))
-          (if sudo
-              ;; Kill each process (probably just one) started by
-              ;; sudo. `process-id' returns the group id that is
-              ;; created by sudo, not the actual process' id. Sending
-              ;; a signal to this group id *may not* be redirected to
-              ;; the children. So instead, we find the children and
-              ;; send them the signal, using `sudo kill'.
-              (--each (s-lines
-                       (s-trim
-                        (shell-command-to-string
-                         (format "pgrep -P %s" (process-id process)))))
-                (prodigy-start-sudo-process
-                 "*prodigy-sudo-kill*" nil
-                 "kill"
-                 (concat "-" (cond
-                              ((null stop-signal) "INT")
-                              ((symbolp stop-signal) (upcase (symbol-name stop-signal)))
-                              (force "KILL")))
-                 it))
+        (let ((stop-signal (prodigy-service-stop-signal service)))
+          (if (plist-get service :sudo)
+              (prodigy-start-sudo-process
+               "*prodigy-sudo-kill*" nil
+               "kill"
+               (concat "-" (cond
+                            ((null stop-signal) "INT")
+                            ((symbolp stop-signal) (upcase (symbol-name stop-signal)))
+                            (force "KILL")))
+               (concat "-" (number-to-string (process-id process))))
             (cond ((eq stop-signal 'int)
                    (interrupt-process process))
                   ((or force (eq stop-signal 'kill))
